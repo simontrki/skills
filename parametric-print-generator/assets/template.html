@@ -1,0 +1,653 @@
+<!doctype html>
+<!--
+  Parametric 3D-print generator – single-file template
+  (from the "parametric-print-generator" skill, https://github.com/simontrki/skills)
+
+  Example model: honeycomb plate with solid rim and countersunk screw holes (2 colours).
+  Replace build(p) and the parameter sections with the new project's geometry.
+
+  Third-party components (loaded from cdn.jsdelivr.net at runtime):
+  - three.js 0.160.0 (incl. OrbitControls) – MIT License, © 2010-2023 three.js authors
+  - manifold-3d 3.0.0 – Apache License 2.0, © the Manifold authors
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wabenplatte</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --ink:#1c2026; --muted:#6b7280; --line:#e2e5ea;
+    --accent:#d9731a; --accent-ink:#fff; --field:#f7f8fa; --viewport:#e9ecf0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14171b; --panel:#1c2026; --ink:#e7e9ec; --muted:#9aa3ad; --line:#2c323a;
+      --accent:#f08a2c; --accent-ink:#111; --field:#232830; --viewport:#191c21;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14171b; --panel:#1c2026; --ink:#e7e9ec; --muted:#9aa3ad; --line:#2c323a;
+    --accent:#f08a2c; --accent-ink:#111; --field:#232830; --viewport:#191c21;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .app{display:grid;grid-template-columns:330px 1fr;height:100vh}
+  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:14px 16px 24px}
+  h1{font-size:16px;margin:0 0 2px}
+  .sub{color:var(--muted);margin:0 0 12px;font-size:12px}
+  details{border-top:1px solid var(--line);padding:8px 0}
+  summary{cursor:pointer;font-weight:600;padding:2px 0;list-style:none}
+  summary::before{content:"▸ ";color:var(--muted)}
+  details[open] summary::before{content:"▾ "}
+  .row{display:grid;grid-template-columns:1fr 92px;align-items:center;gap:8px;margin:6px 0}
+  .row small{display:block;color:var(--muted);font-size:11px}
+  input[type=number],select,input[type=text]{width:100%;padding:5px 6px;border:1px solid var(--line);
+    border-radius:6px;background:var(--field);color:var(--ink);font:inherit}
+  input[type=checkbox]{justify-self:end;width:18px;height:18px;accent-color:var(--accent)}
+  input[type=color]{width:100%;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--field)}
+  .btns{display:flex;gap:8px;margin:8px 0 4px}
+  button{flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--field);
+    color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  button:disabled{opacity:.5;cursor:wait}
+  .exportgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0 0 4px}
+  .exportgrid button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:7px 6px;line-height:1.2}
+  .exportgrid button small{font-weight:400;font-size:10.5px;opacity:.8}
+  .stats{margin:6px 0 12px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:12px}
+  .stats span:nth-child(odd){color:var(--muted)}
+  .warn{color:#d23c3c;font-size:12px;margin:0 0 8px;white-space:pre-line}
+  .quick{background:var(--field);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px}
+  .quick h2{font-size:13px;margin:0 0 8px}
+  .qgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
+  .qgrid label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted)}
+  .qgrid label.wide{grid-column:1 / -1}
+  .qgrid input,.qgrid select{background:var(--panel)}
+  .swap{flex:none;width:34px;padding:0}
+  main{position:relative;background:var(--viewport);min-height:0}
+  #view{position:absolute;inset:0}
+  .overlay{position:absolute;left:12px;top:12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:6px 10px;font-size:12px;display:none}
+  .overlay.on{display:block}
+  .toolbar{position:absolute;right:12px;top:12px;display:flex;gap:4px;align-items:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .toolbar .ico{flex:none;width:34px;height:34px;padding:0;display:grid;place-items:center;border:0;background:transparent;border-radius:7px;color:var(--ink)}
+  .toolbar .ico:hover{background:var(--field)}
+  .toolbar .ico.on{background:var(--accent);color:var(--accent-ink)}
+  .toolbar .lang{font-weight:700;font-size:12px;letter-spacing:.5px}
+  .toolbar .sep{width:1px;height:22px;background:var(--line);margin:0 3px}
+  .toast{position:absolute;right:12px;top:58px;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:6px 10px;font-size:12px;opacity:0;transition:opacity .3s;pointer-events:none;max-width:320px}
+  .toast.on{opacity:1}
+  @media (max-width:760px){
+    .app{grid-template-columns:1fr;grid-template-rows:55vh auto;height:auto}
+    main{order:-1;height:55vh}
+    aside{border-right:0;border-top:1px solid var(--line);padding:14px 16px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Wabenplatte</h1>
+    <p class="sub">Parametrisch · 2 Farben · STL/3MF-Export</p>
+
+    <!-- 1) Export + Kennwerte ganz oben -->
+    <div class="exportgrid">
+      <button id="regen"><b>Neu berechnen</b></button>
+      <button id="export3mf" class="primary"><b>3MF</b><small>2-farbig, A + B</small></button>
+      <button id="export"><b>Modell STL</b><small>einfarbig, alles in einem</small></button>
+      <button id="exportA"><b>Teil A STL</b><small>nur Farbe A</small></button>
+      <button id="exportB"><b>Teil B STL</b><small>nur Farbe B</small></button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="warn" id="warn"></div>
+
+    <!-- 2) Quick-Setup: data-target koppelt an ein Detail-Feld, data-also setzt weitere Felder mit -->
+    <section class="quick">
+      <h2>Quick-Setup</h2>
+      <div class="qgrid">
+        <label>Breite X (mm)<input type="number" data-target="sizeX" step="1"></label>
+        <label>Tiefe Y (mm)<input type="number" data-target="sizeY" step="1"></label>
+        <label>Plattenhöhe (mm)<input type="number" data-target="thick" step="0.2"></label>
+        <label>Randhöhe (mm)<input type="number" data-target="rimH" step="0.5"></label>
+        <label>Wabe Ø (mm)<input type="number" data-target="cell" step="0.5"></label>
+        <label>Wand (mm)<input type="number" data-target="web" data-also="rim" step="0.1"></label>
+        <label>Löcher X (Stk.)<input type="number" data-target="holesX" step="1"></label>
+        <label>Löcher Y (Stk.)<input type="number" data-target="holesY" step="1"></label>
+        <label class="wide">Farben<span style="display:flex;gap:6px"><select data-target="palette" style="flex:1"></select><button type="button" class="swap swapBtn" title="Farben tauschen (A ↔ B)">⇅</button></span></label>
+        <label class="wide">Farbtrennung<select data-target="colorSplit"></select></label>
+      </div>
+    </section>
+
+    <!-- 3) Detail-Bereiche, standardmäßig zugeklappt -->
+    <details>
+      <summary>Platte</summary>
+      <div class="row"><label>Breite X (mm)</label><input type="number" id="sizeX" value="200" min="20" step="1"></div>
+      <div class="row"><label>Tiefe Y (mm)</label><input type="number" id="sizeY" value="150" min="20" step="1"></div>
+      <div class="row"><label>Plattenhöhe (mm)<small>Wabenschicht</small></label><input type="number" id="thick" value="2" min="0.4" step="0.2"></div>
+      <div class="row"><label>Randbreite (mm)</label><input type="number" id="rim" value="1" min="0.4" step="0.1"></div>
+      <div class="row"><label>Randhöhe (mm)<small>über der Platte</small></label><input type="number" id="rimH" value="4" min="0" step="0.5"></div>
+    </details>
+
+    <details>
+      <summary>Waben</summary>
+      <div class="row"><label>Zellgröße (mm)<small>Schlüsselweite Mitte–Mitte</small></label><input type="number" id="cell" value="10" min="2" step="0.5"></div>
+      <div class="row"><label>Stegbreite (mm)</label><input type="number" id="web" value="1" min="0.3" step="0.1"></div>
+      <div class="row"><label>Wabenrichtung</label>
+        <select id="hexRot"><option value="0">0°</option><option value="90">90°</option></select></div>
+    </details>
+
+    <details>
+      <summary>Bohrungen (Senkkopf)</summary>
+      <div class="row"><label>Bohrungen aktiv</label><input type="checkbox" id="holes" checked></div>
+      <div class="row"><label>Löcher X (Stk.)</label><input type="number" id="holesX" value="3" min="1" step="1"></div>
+      <div class="row"><label>Löcher Y (Stk.)</label><input type="number" id="holesY" value="2" min="1" step="1"></div>
+      <div class="row"><label>Randabstand (mm)</label><input type="number" id="holeInset" value="15" min="3" step="0.5"></div>
+      <div class="row"><label>Bohrung Ø (mm)</label><input type="number" id="holeD" value="4" min="1" step="0.1"></div>
+      <div class="row"><label>Senkkopf Ø (mm)</label><input type="number" id="headD" value="8" min="2" step="0.1"></div>
+      <div class="row"><label>Senkwinkel (°)</label><input type="number" id="csAngle" value="90" min="60" max="120" step="1"></div>
+      <div class="row"><label>Dom-Wandstärke (mm)<small>massiver Ring ums Loch</small></label><input type="number" id="bossWall" value="1.6" min="0.4" step="0.1"></div>
+      <div class="row"><label>Domhöhe (mm)<small>über der Platte</small></label><input type="number" id="bossH" value="2" min="0" step="0.2"></div>
+    </details>
+
+    <details>
+      <summary>Farben (2-farbig)</summary>
+      <div class="row"><label>Vorschlag</label><select id="palette"></select></div>
+      <div class="row"><label>Farbe A: Platte</label><input type="color" id="colA" value="#c8a97e"></div>
+      <div class="row"><label>Farbe B: Rand + Dome</label><input type="color" id="colB" value="#383b40"></div>
+      <div class="btns"><button type="button" class="swapBtn">⇅ Farben tauschen (A ↔ B)</button></div>
+      <p class="sub" id="paletteNote" style="margin:4px 0"></p>
+      <div class="row"><label>Farbtrennung</label>
+        <select id="colorSplit"><option value="part">nach Bauteil (AMS / Multi-Material)</option><option value="height">nach Höhe (Farbwechsel M600)</option></select></div>
+      <p class="sub" id="splitNote" style="margin:4px 0"></p>
+    </details>
+
+    <details>
+      <summary>Ausgabe</summary>
+      <div class="row"><label>Kreis-Segmente (Stk.)</label><input type="number" id="segs" value="48" min="12" max="128" step="4"></div>
+      <div class="row"><label>Dichte (g/cm³)<small>PLA 1.24 · PETG 1.27</small></label><input type="number" id="density" value="1.24" min="0.5" step="0.01"></div>
+      <div class="row"><label>Name<small>Datei: Name_Datum_Uhrzeit.stl</small></label><input type="text" id="fname" value="wabenplatte"></div>
+      <div class="row" style="grid-template-columns:1fr"><small id="fnamePreview" style="color:var(--muted);word-break:break-all"></small></div>
+    </details>
+    <input type="file" id="cfgFile" accept=".json,application/json" style="display:none">
+  </aside>
+
+  <main>
+    <div id="view"></div>
+    <div class="overlay" id="busy">Berechne Geometrie…</div>
+    <div class="toolbar">
+      <button id="cfgLoad" class="ico" title="Konfiguration öffnen (JSON)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 9H5z"/></svg></button>
+      <button id="cfgSave" class="ico" title="Konfiguration speichern (JSON herunterladen)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v6h9V3"/><rect x="7" y="13" width="10" height="7"/></svg></button>
+      <button id="cfgReset" class="ico" title="Standardwerte wiederherstellen"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+      <span class="sep"></span>
+      <button id="xray" class="ico" title="Röntgenansicht ein/aus"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16M4 15h16M9 4v16M15 4v16" opacity=".55"/></svg></button>
+      <button id="ghostBtn" class="ico" title="Nachbarteile ein/aus"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="6" height="6"/><rect x="2" y="9" width="5" height="6" stroke-dasharray="2 2"/><rect x="17" y="9" width="5" height="6" stroke-dasharray="2 2"/><rect x="9" y="2" width="6" height="5" stroke-dasharray="2 2"/><rect x="9" y="17" width="6" height="5" stroke-dasharray="2 2"/></svg></button>
+      <button id="resetView" class="ico" title="Ansicht zurücksetzen"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg></button>
+      <span class="sep"></span>
+      <button id="langBtn" class="ico lang" title="Switch to English">EN</button>
+    </div>
+    <div class="toast" id="toast"></div>
+  </main>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import Module from 'https://cdn.jsdelivr.net/npm/manifold-3d@3.0.0/manifold.js';
+
+const $ = id => document.getElementById(id);
+const APP_KEY = 'wabenplatte';                  // localStorage-Präfix – pro Projekt ändern
+
+/* ================= Sprache / Language ================= */
+// Schlüssel = deutscher Text exakt wie im DOM (getrimmt). Neue Texte hier ergänzen.
+const EN = {
+  'Wabenplatte':'Honeycomb Plate','Parametrisch · 2 Farben · STL/3MF-Export':'Parametric · 2 colours · STL/3MF export',
+  'Neu berechnen':'Recompute','2-farbig, A + B':'2-colour, A + B','Modell STL':'Model STL','einfarbig, alles in einem':'single colour, all in one',
+  'Teil A STL':'Part A STL','Teil B STL':'Part B STL','nur Farbe A':'colour A only','nur Farbe B':'colour B only',
+  'Quick-Setup':'Quick setup','Breite X (mm)':'Width X (mm)','Tiefe Y (mm)':'Depth Y (mm)','Plattenhöhe (mm)':'Plate height (mm)',
+  'Randhöhe (mm)':'Rim height (mm)','Wabe Ø (mm)':'Cell Ø (mm)','Wand (mm)':'Wall (mm)','Löcher X (Stk.)':'Holes X (pcs)','Löcher Y (Stk.)':'Holes Y (pcs)',
+  'Farben':'Colours','Farbtrennung':'Colour split','Farben tauschen (A ↔ B)':'Swap colours (A ↔ B)','⇅ Farben tauschen (A ↔ B)':'⇅ Swap colours (A ↔ B)',
+  'Platte':'Plate','Wabenschicht':'honeycomb layer','Randbreite (mm)':'Rim width (mm)','über der Platte':'above the plate',
+  'Waben':'Honeycomb','Zellgröße (mm)':'Cell size (mm)','Schlüsselweite Mitte–Mitte':'centre-to-centre pitch','Stegbreite (mm)':'Web width (mm)','Wabenrichtung':'Honeycomb orientation',
+  'Bohrungen (Senkkopf)':'Screw holes (countersunk)','Bohrungen aktiv':'Holes enabled','Randabstand (mm)':'Edge distance (mm)','Bohrung Ø (mm)':'Hole Ø (mm)',
+  'Senkkopf Ø (mm)':'Countersink Ø (mm)','Senkwinkel (°)':'Countersink angle (°)','Dom-Wandstärke (mm)':'Boss wall (mm)','massiver Ring ums Loch':'solid ring around hole',
+  'Domhöhe (mm)':'Boss height (mm)','Farben (2-farbig)':'Colours (2-colour)','Vorschlag':'Preset','Farbe A: Platte':'Colour A: plate','Farbe B: Rand + Dome':'Colour B: rim + bosses',
+  'nach Bauteil (AMS / Multi-Material)':'by part (AMS / multi-material)','nach Höhe (Farbwechsel M600)':'by height (filament change M600)',
+  'Ausgabe':'Output','Kreis-Segmente (Stk.)':'Circle segments (pcs)','Dichte (g/cm³)':'Density (g/cm³)','Name':'Name','Datei: Name_Datum_Uhrzeit.stl':'File: name_date_time.stl',
+  'Konfiguration öffnen (JSON)':'Open configuration (JSON)','Konfiguration speichern (JSON herunterladen)':'Save configuration (download JSON)',
+  'Standardwerte wiederherstellen':'Restore defaults','Röntgenansicht ein/aus':'X-ray view on/off','Nachbarteile ein/aus':'Neighbour parts on/off','Ansicht zurücksetzen':'Reset view',
+  // Kennwerte
+  'Abmessungen':'Dimensions','Gesamthöhe':'Total height','Bohrungen':'Holes','Volumen':'Volume','Gewicht ca.':'Weight approx.','Farbe A / B':'Colour A / B',
+  'Dreiecke':'Triangles','Rechenzeit':'Compute time',
+  // Paletten
+  'Natur + Anthrazit':'Natural + anthracite','Schwarz + Orange':'Black + orange','Weiß + Holz':'White + wood','Grau + Gelb':'Grey + yellow','Eigene Farben':'Custom colours',
+  'Ruhig, A tritt zurück, B setzt Akzente.':'Calm, A stays in the background, B adds accents.','Werkstatt-Look, hoher Kontrast.':'Workshop look, high contrast.',
+  'Hell und freundlich.':'Light and friendly.','Industrie-Optik.':'Industrial look.',
+};
+let LANG = 'de';
+try { LANG = localStorage.getItem(APP_KEY + '-lang') || 'de'; } catch(_){}
+const tr = s => LANG === 'en' ? (EN[s] ?? s) : s;
+const L = (de, en) => LANG === 'en' ? en : de;
+const ORIG = new WeakMap(), ORIG_T = new WeakMap();
+const DYNAMIC = ['stats', 'warn', 'paletteNote', 'splitNote', 'toast', 'busy', 'fnamePreview'];
+function translateDOM(){
+  document.documentElement.lang = LANG;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => {
+      const p = n.parentElement;
+      if (!p || p.closest('script,style,svg') || DYNAMIC.some(id => p.closest('#' + id))) return NodeFilter.FILTER_REJECT;
+      return n.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  for (let n; (n = walker.nextNode());){
+    if (!ORIG.has(n)) ORIG.set(n, n.nodeValue);
+    const o = ORIG.get(n), k = o.trim();
+    n.nodeValue = LANG === 'en' && EN[k] ? o.replace(k, EN[k]) : o;
+  }
+  document.querySelectorAll('[title]').forEach(el => {
+    if (!ORIG_T.has(el)) ORIG_T.set(el, el.title);
+    const o = ORIG_T.get(el); el.title = LANG === 'en' ? (EN[o] ?? o) : o;
+  });
+  document.title = tr('Wabenplatte');
+  $('langBtn').textContent = LANG === 'en' ? 'DE' : 'EN';
+  $('langBtn').title = LANG === 'en' ? 'Auf Deutsch umschalten' : 'Switch to English';
+}
+function setLang(l){
+  LANG = l; try { localStorage.setItem(APP_KEY + '-lang', l); } catch(_){}
+  translateDOM();
+  const pl = PALETTES.find(p => p.id === $('palette').value);
+  $('paletteNote').textContent = pl && pl.id !== 'custom' ? tr(pl.note) : '';
+  updateSplitNote();
+  if (W) regenerate();
+}
+
+/* ================= Parameter ================= */
+const NUM = ['sizeX','sizeY','thick','rim','rimH','cell','web','holesX','holesY','holeInset','holeD','headD','csAngle','bossWall','bossH','segs','density'];
+function readParams(){
+  const p = {};
+  for (const k of NUM) p[k] = parseFloat($(k).value) || 0;
+  p.hexRot = +$('hexRot').value; p.holes = $('holes').checked; p.colorSplit = $('colorSplit').value;
+  return p;
+}
+
+/* ================= Geometrie (manifold-3d) ================= */
+let W;                                      // wasm-Modul
+
+// Sechseck-Löcher für ein Wabengitter, am Ursprung verankert (symmetrisch zur Modellmitte)
+function hexPolys(x0, y0, x1, y1, cell, web, rot){
+  const r = (cell - web) / Math.sqrt(3);
+  if (r <= 0) return [];
+  const dy = cell * Math.sqrt(3) / 2;
+  const [a0, b0, a1, b1] = rot ? [y0, x0, y1, x1] : [x0, y0, x1, y1];
+  const polys = [];
+  for (let j = Math.floor(b0 / dy) - 1; j * dy <= b1 + dy; j++){
+    const off = (j & 1) ? cell / 2 : 0;
+    for (let i = Math.floor((a0 - off) / cell) - 1; i * cell + off <= a1 + cell; i++){
+      const cx = i * cell + off, cy = j * dy, pts = [];
+      for (let k = 0; k < 6; k++){
+        const a = (30 + 60 * k) * Math.PI / 180;
+        const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
+        pts.push(rot ? [py, px] : [px, py]);
+      }
+      polys.push(pts);
+    }
+  }
+  return polys;
+}
+
+// build(p) → { manifold (alles), colA, colB, info, warnings }
+// Konvention: Z oben, Modell in XY zentriert, z = 0 ist die Auflage-/Druckbettseite.
+function build(p){
+  const { CrossSection, Manifold } = W;
+  const trash = [];                          // alle Zwischenobjekte → am Ende delete()
+  const T = o => (trash.push(o), o);
+  const warnings = [];
+  const segs = Math.max(12, Math.round(p.segs));
+  const rect = (x0, y0, x1, y1) => T(new CrossSection([[[x0,y0],[x1,y0],[x1,y1],[x0,y1]]], 'NonZero'));
+  const latticeIn = (region, cell, web) => {
+    const b = region.bounds();
+    const hp = hexPolys(b.min[0], b.min[1], b.max[0], b.max[1], cell, web, p.hexRot === 90);
+    return hp.length ? T(region.subtract(T(new CrossSection(hp, 'NonZero')))) : region;
+  };
+
+  const SX = p.sizeX, SY = p.sizeY, t = p.thick, H = t + p.rimH;
+  const partsA = [], partsB = [], cuts = [];
+
+  // Farbe A: Wabenplatte
+  const inner = rect(-SX/2 + p.rim, -SY/2 + p.rim, SX/2 - p.rim, SY/2 - p.rim);
+  partsA.push(T(T(latticeIn(inner, p.cell, p.web)).extrude(t)));
+
+  // Farbe B: Rand (volle Höhe)
+  const ring = T(rect(-SX/2, -SY/2, SX/2, SY/2).subtract(inner));
+  partsB.push(T(ring.extrude(H)));
+
+  // Farbe B: Senkkopf-Dome + Bohrungen
+  let holeCount = 0;
+  if (p.holes){
+    const hr = p.holeD / 2, rr = p.headD / 2, rb = rr + p.bossWall, bh = t + p.bossH;
+    const csDepth = (rr - hr) / Math.tan(p.csAngle / 2 * Math.PI / 180);
+    if (csDepth > bh) warnings.push(L('Senkung tiefer als der Dom.', 'Countersink deeper than the boss.'));
+    if (2 * p.holeInset < 2 * rb) warnings.push(L('Randabstand kleiner als der Dom.', 'Edge distance smaller than the boss.'));
+    const grid = (n, size) => n <= 1 ? [0] : Array.from({ length: n }, (_, i) => -size / 2 + p.holeInset + i * (size - 2 * p.holeInset) / (n - 1));
+    for (const x of grid(Math.round(p.holesX), SX)) for (const y of grid(Math.round(p.holesY), SY)){
+      partsB.push(T(T(Manifold.cylinder(bh, rb, rb, segs)).translate([x, y, 0])));
+      cuts.push(T(T(Manifold.cylinder(bh + 2, hr, hr, segs)).translate([x, y, -1])));
+      cuts.push(T(T(Manifold.cylinder(csDepth, hr, rr, segs)).translate([x, y, bh - csDepth])));
+      cuts.push(T(T(Manifold.cylinder(2, rr, rr, segs)).translate([x, y, bh - 0.001])));
+      holeCount++;
+    }
+  }
+
+  // Zwei Farbkörper ohne Überlappung (wichtig für Multi-Material)
+  const cut = cuts.length ? T(Manifold.union(cuts)) : null;
+  const sub = m => cut ? T(m.subtract(cut)) : m;
+  const bodyB = sub(T(Manifold.union(partsB)));
+  const bodyA = T(sub(T(Manifold.union(partsA))).subtract(bodyB));
+  const result = Manifold.union(bodyA, bodyB);
+  let colA, colB;
+  if (p.colorSplit === 'height'){            // Farbwechsel nach Schichthöhe
+    const big = Math.max(SX, SY) * 4;
+    colA = result.intersect(T(T(Manifold.cube([big, big, t + 1])).translate([-big/2, -big/2, -1])));
+    colB = result.intersect(T(T(Manifold.cube([big, big, H + 10])).translate([-big/2, -big/2, t])));
+  } else {
+    colA = bodyA.translate([0, 0, 0]);       // translate = Kopie, damit trash-delete sie nicht trifft
+    colB = bodyB.translate([0, 0, 0]);
+  }
+  for (const o of trash){ try { o.delete(); } catch(_){} }
+  return { manifold: result, colA, colB, info: { SX, SY, H, holeCount, splitZ: t }, warnings };
+}
+
+/* ================= Three.js ================= */
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 1, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(200, 400, 250); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.5); fill.position.set(-250, 150, -200); scene.add(fill);
+const matA = new THREE.MeshStandardMaterial({ color: 0xc8a97e, roughness: 0.6, side: THREE.DoubleSide });
+const matB = new THREE.MeshStandardMaterial({ color: 0x383b40, roughness: 0.55, side: THREE.DoubleSide });
+const ghostMat = new THREE.MeshStandardMaterial({ color: 0x8a96a8, roughness: 0.7, transparent: true, opacity: 0.35, depthWrite: false });
+let meshA = null, meshB = null, grid = null, lastGeo = null, ghostOn = false, xrayOn = false;
+const ghosts = [];
+
+function applyTheme(){ scene.background = new THREE.Color(matchMedia('(prefers-color-scheme: dark)').matches ? 0x191c21 : 0xe9ecf0); }
+applyTheme(); matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+function resize(){
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h, false); renderer.domElement.style.width = '100%'; renderer.domElement.style.height = '100%';
+  camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view);
+function resetView(){
+  const p = readParams(), s = Math.max(p.sizeX, p.sizeY);
+  camera.position.set(s * 0.75, s * 1.35, s * 1.45); controls.target.set(0, 0, 0); controls.update();
+}
+// manifold (Z oben) → three (Y oben)
+function toGeo(man){
+  const m = man.getMesh(), np = m.numProp, vp = m.vertProperties, tv = m.triVerts;
+  const pos = new Float32Array(tv.length * 3);
+  for (let i = 0; i < tv.length; i++){ const v = tv[i] * np; pos[i*3] = vp[v]; pos[i*3+1] = vp[v+2]; pos[i*3+2] = -vp[v+1]; }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.computeVertexNormals();
+  return g;
+}
+function updateMesh(all, colA, colB, p){
+  for (const m of [meshA, meshB]) if (m){ scene.remove(m); m.geometry.dispose(); }
+  meshA = colA ? new THREE.Mesh(toGeo(colA), matA) : null; if (meshA) scene.add(meshA);
+  meshB = colB ? new THREE.Mesh(toGeo(colB), matB) : null; if (meshB) scene.add(meshB);
+  if (lastGeo) lastGeo.dispose();
+  lastGeo = toGeo(all); updateGhosts(p);
+  if (grid) scene.remove(grid);
+  const s = Math.ceil(Math.max(p.sizeX, p.sizeY) * 1.4 / 10) * 10;
+  grid = new THREE.GridHelper(s, s / 10, 0x888888, 0x888888);
+  grid.material.transparent = true; grid.material.opacity = 0.25; grid.position.y = -0.05; scene.add(grid);
+  return all.numTri();
+}
+function updateGhosts(p){
+  for (const g of ghosts) scene.remove(g); ghosts.length = 0;
+  if (!ghostOn || !lastGeo) return;
+  for (const [dx, dy] of [[p.sizeX, 0], [0, -p.sizeY], [-p.sizeX, 0], [0, p.sizeY]]){
+    const g = new THREE.Mesh(lastGeo, ghostMat); g.position.set(dx, 0, -dy); scene.add(g); ghosts.push(g);
+  }
+}
+function setXray(on){
+  xrayOn = on;
+  for (const m of [matA, matB]){ m.transparent = on; m.opacity = on ? 0.32 : 1; m.depthWrite = !on; m.needsUpdate = true; }
+  $('xray').classList.toggle('on', on);
+}
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 2600);
+}
+
+/* ================= Berechnen ================= */
+let lastAll = null, lastA = null, lastB = null, firstBuild = true;
+function regenerate(){
+  $('busy').classList.add('on'); $('regen').disabled = true;
+  setTimeout(() => {
+    try {
+      const p = readParams(), t0 = performance.now();
+      const { manifold, colA, colB, info, warnings } = build(p);
+      for (const o of [lastAll, lastA, lastB]) if (o) o.delete();
+      lastAll = manifold; lastA = colA; lastB = colB;
+      const tris = updateMesh(manifold, colA, colB, p);
+      const vol = manifold.volume(), g = v => (v / 1000 * p.density).toFixed(0);
+      $('stats').innerHTML = [
+        ['Abmessungen', `${info.SX} × ${info.SY} mm`], ['Gesamthöhe', `${info.H.toFixed(1)} mm`], ['Bohrungen', info.holeCount],
+        ['Volumen', `${(vol / 1000).toFixed(1)} cm³`], ['Gewicht ca.', `${g(vol)} g`],
+        ['Farbe A / B', `${g(colA.volume())} g / ${g(colB.volume())} g`],
+        ['Dreiecke', tris.toLocaleString(LANG === 'en' ? 'en-GB' : 'de-DE')], ['Rechenzeit', `${(performance.now() - t0).toFixed(0)} ms`],
+      ].map(([a, b]) => `<span>${tr(a)}</span><span>${b}</span>`).join('');
+      $('warn').textContent = warnings.join('\n');
+      if (firstBuild){ resetView(); firstBuild = false; }
+      rememberConfig();
+    } catch (err){
+      console.error(err); $('warn').textContent = L('Fehler: ', 'Error: ') + err.message;
+    } finally { $('busy').classList.remove('on'); $('regen').disabled = false; }
+  }, 30);
+}
+
+/* ================= Export: STL / 3MF ================= */
+function exportName(suffix, ext = 'stl'){
+  const d = new Date(), z = v => String(v).padStart(2, '0');
+  const name = ($('fname').value.trim() || APP_KEY).replace(/[\s\/\\:*?"<>|]+/g, '_');
+  return `${name}${suffix}_${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}_${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}.${ext}`;
+}
+function updateNamePreview(){ $('fnamePreview').textContent = exportName('') + '  ·  ' + exportName('_2farbig', '3mf'); }
+function download(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function exportSTL(man, suffix){                // binäres STL, Koordinaten in mm, Z oben
+  if (!man) return;
+  const m = man.getMesh(), np = m.numProp, vp = m.vertProperties, tv = m.triVerts, nt = tv.length / 3;
+  const dv = new DataView(new ArrayBuffer(84 + nt * 50));
+  dv.setUint32(80, nt, true);
+  let o = 84;
+  for (let t = 0; t < nt; t++){
+    const a = tv[t*3]*np, b = tv[t*3+1]*np, c = tv[t*3+2]*np;
+    const ux = vp[b]-vp[a], uy = vp[b+1]-vp[a+1], uz = vp[b+2]-vp[a+2], wx = vp[c]-vp[a], wy = vp[c+1]-vp[a+1], wz = vp[c+2]-vp[a+2];
+    let nx = uy*wz-uz*wy, ny = uz*wx-ux*wz, nz = ux*wy-uy*wx; const l = Math.hypot(nx, ny, nz) || 1;
+    dv.setFloat32(o, nx/l, true); dv.setFloat32(o+4, ny/l, true); dv.setFloat32(o+8, nz/l, true); o += 12;
+    for (const v of [a, b, c]){ dv.setFloat32(o, vp[v], true); dv.setFloat32(o+4, vp[v+1], true); dv.setFloat32(o+8, vp[v+2], true); o += 12; }
+    o += 2;
+  }
+  download(new Blob([dv.buffer], { type: 'model/stl' }), exportName(suffix));
+}
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipStore(files){                       // minimaler ZIP-Writer (unkomprimiert) für 3MF
+  const enc = new TextEncoder(), chunks = [], central = []; let off = 0;
+  for (const f of files){
+    const nm = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint32(14, crc, true);
+    lh.setUint32(18, sz, true); lh.setUint32(22, sz, true); lh.setUint16(26, nm.length, true);
+    chunks.push(new Uint8Array(lh.buffer), nm, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint32(16, crc, true);
+    ch.setUint32(20, sz, true); ch.setUint32(24, sz, true); ch.setUint16(28, nm.length, true); ch.setUint32(42, off, true);
+    central.push(new Uint8Array(ch.buffer), nm);
+    off += 30 + nm.length + sz;
+  }
+  const cd = central.reduce((a, c) => a + c.length, 0), end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, cd, true); end.setUint32(16, off, true);
+  return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: 'model/3mf' });
+}
+function meshXML(man){
+  const m = man.getMesh(), np = m.numProp, vp = m.vertProperties, tv = m.triVerts, out = ['<mesh><vertices>'];
+  for (let i = 0; i < vp.length / np; i++) out.push(`<vertex x="${vp[i*np].toFixed(4)}" y="${vp[i*np+1].toFixed(4)}" z="${vp[i*np+2].toFixed(4)}"/>`);
+  out.push('</vertices><triangles>');
+  for (let i = 0; i < tv.length; i += 3) out.push(`<triangle v1="${tv[i]}" v2="${tv[i+1]}" v3="${tv[i+2]}"/>`);
+  out.push('</triangles></mesh>');
+  return out.join('');
+}
+// Ein Objekt aus zwei Teilen (components) mit hinterlegten Farben – Slicer: Teilen Filamente zuweisen
+function export3MF(){
+  if (!lastA || !lastB) return;
+  const ca = $('colA').value.toUpperCase() + 'FF', cb = $('colB').value.toUpperCase() + 'FF';
+  const model = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="de-DE" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+<resources>
+<basematerials id="1"><base name="A" displaycolor="${ca}"/><base name="B" displaycolor="${cb}"/></basematerials>
+<object id="2" type="model" name="A" pid="1" pindex="0">${meshXML(lastA)}</object>
+<object id="3" type="model" name="B" pid="1" pindex="1">${meshXML(lastB)}</object>
+<object id="4" type="model" name="${tr('Wabenplatte')}"><components><component objectid="2"/><component objectid="3"/></components></object>
+</resources>
+<build><item objectid="4"/></build>
+</model>`;
+  const enc = new TextEncoder();
+  download(zipStore([
+    { name: '[Content_Types].xml', data: enc.encode('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>') },
+    { name: '_rels/.rels', data: enc.encode('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>') },
+    { name: '3D/3dmodel.model', data: enc.encode(model) },
+  ]), exportName('_2farbig', '3mf'));
+}
+
+/* ================= Farben ================= */
+const PALETTES = [
+  { id: 'natur', name: 'Natur + Anthrazit', a: '#c8a97e', b: '#383b40', note: 'Ruhig, A tritt zurück, B setzt Akzente.' },
+  { id: 'werk',  name: 'Schwarz + Orange',  a: '#1d1d1f', b: '#e8731a', note: 'Werkstatt-Look, hoher Kontrast.' },
+  { id: 'skandi',name: 'Weiß + Holz',       a: '#f1f0ec', b: '#b48a5a', note: 'Hell und freundlich.' },
+  { id: 'ind',   name: 'Grau + Gelb',       a: '#7e8287', b: '#f2c100', note: 'Industrie-Optik.' },
+  { id: 'custom',name: 'Eigene Farben',     a: null, b: null, note: '' },
+];
+function applyColors(){ matA.color.set($('colA').value); matB.color.set($('colB').value); }
+function applyPalette(id){
+  const pl = PALETTES.find(p => p.id === id); $('palette').value = id;
+  if (pl.a){ $('colA').value = pl.a; $('colB').value = pl.b; }
+  $('paletteNote').textContent = tr(pl.note); applyColors();
+}
+function updateSplitNote(){
+  const z = (parseFloat($('thick').value) || 0).toFixed(2);
+  $('splitNote').textContent = $('colorSplit').value === 'height'
+    ? L(`Einfarbiger Drucker: Filamentwechsel (M600 / Pause) bei Z = ${z} mm.`, `Single-colour printer: filament change (M600 / pause) at Z = ${z} mm.`)
+    : L('Getrennte Teile – 3MF importieren und den Teilen im Slicer die Filamente zuweisen.', 'Separate parts – import the 3MF and assign filaments to the parts in your slicer.');
+}
+$('palette').innerHTML = PALETTES.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+applyPalette('natur');
+
+/* ================= Quick-Setup ================= */
+const quickEls = [...document.querySelectorAll('[data-target]')];
+function syncQuick(){
+  for (const q of quickEls){
+    const t = $(q.dataset.target);
+    if (q.tagName === 'SELECT' && !q.options.length) q.innerHTML = t.innerHTML;
+    q.value = t.value;
+  }
+}
+for (const q of quickEls) q.addEventListener('change', () => {
+  for (const id of [q.dataset.target, ...(q.dataset.also ? q.dataset.also.split(',') : [])]){
+    $(id).value = q.value; $(id).dispatchEvent(new Event('change'));
+  }
+});
+
+/* ================= Konfiguration ================= */
+const CFG_KEY = APP_KEY + '-config';
+const cfgEls = () => [...document.querySelectorAll('aside input[id], aside select[id]')].filter(el => el.type !== 'file');
+const DEFAULTS = Object.fromEntries(cfgEls().map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value]));
+const getConfig = () => ({ app: APP_KEY, version: 1, saved: new Date().toISOString(),
+  values: Object.fromEntries(cfgEls().map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value])) });
+function setConfig(values){
+  for (const [id, v] of Object.entries(values || {})){
+    const el = $(id); if (!el || el.type === 'file') continue;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+  }
+  const pl = PALETTES.find(p => p.id === $('palette').value);
+  $('paletteNote').textContent = pl && pl.id !== 'custom' ? tr(pl.note) : '';
+  applyColors(); updateSplitNote(); updateNamePreview(); syncQuick();
+}
+function rememberConfig(){ try { localStorage.setItem(CFG_KEY, JSON.stringify(getConfig())); } catch(_){} }
+
+/* ================= Events ================= */
+let deb = null;
+const NO_REBUILD = ['density', 'fname', 'palette', 'colA', 'colB'];
+cfgEls().forEach(el => el.addEventListener('change', () => {
+  syncQuick(); setTimeout(rememberConfig, 0);
+  if (NO_REBUILD.includes(el.id)) return;
+  clearTimeout(deb); deb = setTimeout(regenerate, 150);
+}));
+$('density').addEventListener('change', regenerate);
+$('fname').addEventListener('input', updateNamePreview);
+$('palette').addEventListener('change', () => applyPalette($('palette').value));
+for (const id of ['colA', 'colB']) $(id).addEventListener('input', () => { $('palette').value = 'custom'; $('paletteNote').textContent = ''; applyColors(); });
+$('colorSplit').addEventListener('change', updateSplitNote);
+$('thick').addEventListener('change', updateSplitNote);
+document.querySelectorAll('.swapBtn').forEach(b => b.addEventListener('click', e => {
+  e.preventDefault();
+  const a = $('colA').value; $('colA').value = $('colB').value; $('colB').value = a;
+  applyColors(); rememberConfig(); toast(L('Farben getauscht: A ↔ B', 'Colours swapped: A ↔ B'));
+}));
+$('regen').addEventListener('click', regenerate);
+$('export').addEventListener('click', () => exportSTL(lastAll, ''));
+$('exportA').addEventListener('click', () => exportSTL(lastA, '_A'));
+$('exportB').addEventListener('click', () => exportSTL(lastB, '_B'));
+$('export3mf').addEventListener('click', export3MF);
+$('cfgSave').addEventListener('click', () => {
+  const nm = exportName('_konfig', 'json');
+  download(new Blob([JSON.stringify(getConfig(), null, 2)], { type: 'application/json' }), nm);
+  toast(L('Gespeichert: ', 'Saved: ') + nm);
+});
+$('cfgLoad').addEventListener('click', () => $('cfgFile').click());
+$('cfgFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const c = JSON.parse(await f.text()); setConfig(c.values || c); toast(L('Geladen: ', 'Loaded: ') + f.name); regenerate(); }
+  catch (err){ toast(L('Datei konnte nicht gelesen werden: ', 'Could not read file: ') + err.message); }
+  e.target.value = '';
+});
+$('cfgReset').addEventListener('click', () => { setConfig(DEFAULTS); applyPalette('natur'); toast(L('Standardwerte gesetzt.', 'Defaults restored.')); regenerate(); });
+$('xray').addEventListener('click', () => setXray(!xrayOn));
+$('ghostBtn').addEventListener('click', () => { ghostOn = !ghostOn; $('ghostBtn').classList.toggle('on', ghostOn); updateGhosts(readParams()); });
+$('resetView').addEventListener('click', resetView);
+$('langBtn').addEventListener('click', () => setLang(LANG === 'en' ? 'de' : 'en'));
+
+/* ================= Start ================= */
+try {
+  const saved = JSON.parse(localStorage.getItem(CFG_KEY) || 'null');
+  if (saved && saved.values){ setConfig(saved.values); setTimeout(() => toast(L('Letzte Einstellungen wiederhergestellt.', 'Last settings restored.')), 300); }
+} catch(_){}
+syncQuick(); updateNamePreview(); setInterval(updateNamePreview, 1000);
+setLang(LANG);
+window.viewer = { camera, controls };          // für Tests (Playwright)
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+$('busy').textContent = L('Lade Geometrie-Kernel…', 'Loading geometry kernel…'); $('busy').classList.add('on');
+W = await Module(); W.setup();
+$('busy').textContent = L('Berechne Geometrie…', 'Computing geometry…');
+resize();
+regenerate();
+</script>
+</body>
+</html>
